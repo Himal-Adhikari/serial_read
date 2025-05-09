@@ -18,29 +18,30 @@ struct StmRxMsg {
 }
 
 struct DistanceData {
-    distance1: f32,
-    distance2: f32,
-    distance3: f32,
-    distance4: f32,
+    distance1: f64,
+    distance2: f64,
+    distance3: f64,
+    distance4: f64,
 }
 
+#[derive(Debug)]
 struct RawData {
-    data1: f32,
-    data2: f32,
-    data3: f32,
-    data4: f32,
+    data1: f64,
+    data2: f64,
+    data3: f64,
+    data4: f64,
 }
 
 #[derive(Debug)]
 struct Converter {
-    m1: f32,
-    m2: f32,
-    m3: f32,
-    m4: f32,
-    c1: f32,
-    c2: f32,
-    c3: f32,
-    c4: f32,
+    m1: f64,
+    m2: f64,
+    m3: f64,
+    m4: f64,
+    c1: f64,
+    c2: f64,
+    c3: f64,
+    c4: f64,
 }
 
 const BYTE_SIZE: usize = std::mem::size_of::<StmRxMsg>();
@@ -68,7 +69,10 @@ fn main() {
             }
 
             distance_datas.push(DistanceData::get_distance_from_user());
-            sensor_datas.push(RawData::get_mean_raw_from_serial(port, 500));
+            let data = RawData::get_mean_raw_from_serial(port, 500);
+            dbg!(&data);
+            sensor_datas.push(data);
+            println!()
         } else {
             eprint!("Couldn't open serial port {arg}");
         }
@@ -88,7 +92,7 @@ impl DistanceData {
             distance4: 0.0,
         }
     }
-    pub fn from(distance1: f32, distance2: f32, distance3: f32, distance4: f32) -> Self {
+    pub fn from(distance1: f64, distance2: f64, distance3: f64, distance4: f64) -> Self {
         DistanceData {
             distance1,
             distance2,
@@ -97,15 +101,16 @@ impl DistanceData {
         }
     }
     pub fn get_distance_from_user() -> Self {
-        let mut distance = String::new();
-        let mut distances = [0.0 as f32; 4];
+        let mut distances = [0.0 as f64; 4];
         for i in 0..4 {
+            let mut distance = String::new();
+            println!("Enter distance for sensor{0}: ", i + 1);
             std::io::stdin()
                 .read_line(&mut distance)
                 .expect("Failed to read line");
             let distance = distance
                 .trim()
-                .parse::<f32>()
+                .parse::<f64>()
                 .expect("Expected a float but did not find one");
             distances[i] = distance;
         }
@@ -122,7 +127,7 @@ impl RawData {
             data4: 0.0,
         }
     }
-    fn from(data1: f32, data2: f32, data3: f32, data4: f32) -> Self {
+    fn from(data1: f64, data2: f64, data3: f64, data4: f64) -> Self {
         RawData {
             data1,
             data2,
@@ -131,7 +136,7 @@ impl RawData {
         }
     }
     fn from_raw_vec(raws: Vec<RawData>) -> Self {
-        let len = raws.len() as f32;
+        let len = raws.len() as f64;
 
         let sum = raws.iter().fold(RawData::new(), |acc, raw| RawData {
             data1: acc.data1 + raw.data1,
@@ -151,12 +156,17 @@ impl RawData {
         let mut raw_vec: Vec<RawData> = Vec::new();
         let mut serial_state = SerialState::StartByte(None);
         let mut buf: [u8; BYTE_SIZE] = [0; BYTE_SIZE];
-        for _i in 0..num {
+        while raw_vec.len() < num {
             match serial_state {
                 SerialState::StartByte(start_in) => {
                     if let Some(()) = start_in {
                         let msg = StmRxMsg::read_from_bytes(&buf).unwrap();
-                        raw_vec.push(RawData::from(msg.dis1, msg.dis2, msg.dis3, msg.dis4));
+                        raw_vec.push(RawData::from(
+                            msg.dis1 as f64,
+                            msg.dis2 as f64,
+                            msg.dis3 as f64,
+                            msg.dis4 as f64,
+                        ));
                         serial_state = receive_data(&mut port, &mut buf, serial_state);
                     } else {
                         serial_state = receive_data(&mut port, &mut buf, serial_state);
@@ -234,12 +244,12 @@ impl Converter {
     }
 }
 
-fn fit_linear_model(xs: &[f32], ys: &[f32]) -> (f32, f32) {
-    let n = xs.len() as f32;
-    let mean_x = xs.iter().sum::<f32>() / n;
-    let mean_y = ys.iter().sum::<f32>() / n;
+fn fit_linear_model(xs: &[f64], ys: &[f64]) -> (f64, f64) {
+    let n = xs.len() as f64;
+    let mean_x = xs.iter().sum::<f64>() / n;
+    let mean_y = ys.iter().sum::<f64>() / n;
 
-    let (mut cov_xy, mut var_x) = (0.0f32, 0.0f32);
+    let (mut cov_xy, mut var_x) = (0.0f64, 0.0f64);
     for (&x, &y) in xs.iter().zip(ys.iter()) {
         let dx = x - mean_x;
         let dy = y - mean_y;
