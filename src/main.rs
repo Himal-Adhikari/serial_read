@@ -6,24 +6,21 @@ enum Err {
     Reserch,
 }
 
-fn manage(mut port: Box<dyn SerialPort>, byte_size: u32) -> Err {
+fn manage(mut port: Box<dyn SerialPort>, byte_size: usize) -> Err {
     let mut error_time: u32 = 0;
-    let mut print_count: u32 = 0;
+    let mut buf: [u8; 1024] = [0; 1024];
 
     loop {
-        let mut byte = vec![0; 1];
-        if let Err(_b) = port.read_exact(&mut byte) {
+        if let Err(_b) = port.read_exact(&mut buf[0..byte_size]) {
             error_time += 1;
         } else {
-            print!("{:02X?} ", byte.first().unwrap());
-            print_count += 1;
+            buf[0..byte_size]
+                .iter()
+                .for_each(|&byte| print!("{:02X?} ", byte));
+            println!();
         }
         if error_time > 50 {
             return Err::Reserch;
-        }
-        if print_count >= byte_size {
-            println!();
-            print_count = 0;
         }
     }
 }
@@ -35,7 +32,7 @@ fn main() {
     let byte_size = args
         .get(2)
         .unwrap_or(&String::from("1"))
-        .parse::<u32>()
+        .parse::<usize>()
         .expect("Expected a number as the second argument");
     loop {
         println!("Trying to Open Port {}", arg);
