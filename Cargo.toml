@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 serialport = "4.6.1"
+zerocopy = "0.X"
+zerocopy-derive = "0.X"
 
 [profile.release]
 strip = true 
