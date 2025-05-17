@@ -1,6 +1,6 @@
 use serial_read::lib::crc::*;
 use serialport::SerialPort;
-use std::time::Duration;
+use std::{fmt::Debug, str::FromStr, time::Duration};
 use zerocopy::FromBytes;
 use zerocopy_derive::FromBytes;
 
@@ -17,6 +17,7 @@ struct StmRxMsg {
     crc: u8,
 }
 
+#[derive(Debug)]
 struct DistanceData {
     distance1: f64,
     distance2: f64,
@@ -52,35 +53,99 @@ fn main() {
     let arg = args.get(1).unwrap_or(&default_tty);
     let mut sensor_datas = Vec::new();
     let mut distance_datas = Vec::new();
-    loop {
-        println!("Trying to Open Port {}", arg);
-        if let Ok(port) = serialport::new(arg, 115200)
-            .timeout(Duration::from_millis(100))
-            .open()
-        {
-            let mut input = String::new();
-            println!("Do you want to add more datas: Y(YES), N(NO): ");
-            std::io::stdin()
-                .read_line(&mut input)
-                .expect("Couldn't read line");
-            let trimmed_input = input.trim().to_lowercase();
-            if trimmed_input != "yes" && trimmed_input != "y" {
-                break;
-            }
 
-            distance_datas.push(DistanceData::get_distance_from_user());
-            let data = RawData::get_mean_raw_from_serial(port, 500);
-            dbg!(&data);
-            sensor_datas.push(data);
-            println!()
-        } else {
-            eprint!("Couldn't open serial port {arg}");
+    println!("Enter number of data points: ");
+    let num_points = get_input_from_user::<usize>();
+
+    for _ in 0..num_points {
+        distance_datas.push(DistanceData::new());
+        sensor_datas.push(RawData::new());
+    }
+
+    println!("Trying to Open Port {}", arg);
+    if let Ok(port) = serialport::new(arg, 115200)
+        .timeout(Duration::from_millis(100))
+        .open()
+    {
+        for i in 0..4 {
+            println!("Provide data for {0}th sensor", i + 1);
+            for index in 0..num_points {
+                let distance = get_input_from_user::<f64>();
+
+                let sensor_data = RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), 100);
+                match i {
+                    0 => {
+                        distance_datas[index].distance1 = distance;
+                        sensor_datas[index].data1 = sensor_data.data1;
+                    }
+                    1 => {
+                        distance_datas[index].distance2 = distance;
+                        sensor_datas[index].data2 = sensor_data.data2;
+                    }
+                    2 => {
+                        distance_datas[index].distance3 = distance;
+                        sensor_datas[index].data3 = sensor_data.data3;
+                    }
+                    3 => {
+                        distance_datas[index].distance4 = distance;
+                        sensor_datas[index].data4 = sensor_data.data4;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        let mut converted_data =
+            Converter::from_raw_data_and_distance_data(&sensor_datas, &distance_datas).unwrap();
+
+        dbg!(&converted_data);
+
+        loop {
+            println!("Do you want to test your model: (Y/N)");
+            let reply = get_input_from_user::<String>().to_lowercase();
+            if reply == "y" || reply == "yes" {
+                let sensor_data = RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), 100);
+                let distance = converted_data.convert(sensor_data);
+                dbg!(distance);
+            } else {
+                println!("Do you want to redo the model: (Y/N)");
+                let reply = get_input_from_user::<String>().to_lowercase();
+                if reply != "y" && reply != "yes" {
+                    break;
+                }
+                println!("Which sensor do you want to redo: ");
+                let sensor_num = get_input_from_user::<usize>();
+                for index in 0..num_points {
+                    let distance = get_input_from_user::<f64>();
+
+                    let sensor_data =
+                        RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), 100);
+                    match sensor_num {
+                        0 => {
+                            distance_datas[index].distance1 = distance;
+                            sensor_datas[index].data1 = sensor_data.data1;
+                        }
+                        1 => {
+                            distance_datas[index].distance2 = distance;
+                            sensor_datas[index].data2 = sensor_data.data2;
+                        }
+                        2 => {
+                            distance_datas[index].distance3 = distance;
+                            sensor_datas[index].data3 = sensor_data.data3;
+                        }
+                        3 => {
+                            distance_datas[index].distance4 = distance;
+                            sensor_datas[index].data4 = sensor_data.data4;
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                converted_data =
+                    Converter::from_raw_data_and_distance_data(&sensor_datas, &distance_datas)
+                        .unwrap();
+            }
         }
     }
-    let converted_data =
-        Converter::from_raw_data_and_distance_data(sensor_datas, distance_datas).unwrap();
-
-    dbg!(converted_data);
 }
 
 impl DistanceData {
@@ -91,30 +156,6 @@ impl DistanceData {
             distance3: 0.0,
             distance4: 0.0,
         }
-    }
-    pub fn from(distance1: f64, distance2: f64, distance3: f64, distance4: f64) -> Self {
-        DistanceData {
-            distance1,
-            distance2,
-            distance3,
-            distance4,
-        }
-    }
-    pub fn get_distance_from_user() -> Self {
-        let mut distances = [0.0 as f64; 4];
-        for i in 0..4 {
-            let mut distance = String::new();
-            println!("Enter distance for sensor{0}: ", i + 1);
-            std::io::stdin()
-                .read_line(&mut distance)
-                .expect("Failed to read line");
-            let distance = distance
-                .trim()
-                .parse::<f64>()
-                .expect("Expected a float but did not find one");
-            distances[i] = distance;
-        }
-        DistanceData::from(distances[0], distances[1], distances[2], distances[3])
     }
 }
 
@@ -183,8 +224,8 @@ impl RawData {
 
 impl Converter {
     pub fn from_raw_data_and_distance_data(
-        raw_samples: Vec<RawData>,
-        distance_samples: Vec<DistanceData>,
+        raw_samples: &Vec<RawData>,
+        distance_samples: &Vec<DistanceData>,
     ) -> Option<Self> {
         let sample_count = raw_samples.len();
         if sample_count < 2 || distance_samples.len() != sample_count {
@@ -234,7 +275,7 @@ impl Converter {
         })
     }
 
-    pub fn convert(&self, raw: RawData) -> DistanceData {
+    fn convert(&self, raw: RawData) -> DistanceData {
         DistanceData {
             distance1: self.m1 * raw.data1 + self.c1,
             distance2: self.m2 * raw.data2 + self.c2,
@@ -260,4 +301,16 @@ fn fit_linear_model(xs: &[f64], ys: &[f64]) -> (f64, f64) {
     let slope = cov_xy / var_x;
     let intercept = mean_y - slope * mean_x;
     (slope, intercept)
+}
+
+fn get_input_from_user<T>() -> T
+where
+    T: FromStr,
+    T::Err: Debug,
+{
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read line");
+    return input.trim().parse::<T>().expect("Couldn't parse");
 }
