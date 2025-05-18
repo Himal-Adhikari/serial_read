@@ -1,5 +1,7 @@
+use serde::Serialize;
 use serial_read::lib::crc::*;
 use serialport::SerialPort;
+use std::fs::File;
 use std::{fmt::Debug, str::FromStr, time::Duration};
 use zerocopy::FromBytes;
 use zerocopy_derive::FromBytes;
@@ -33,7 +35,7 @@ struct RawData {
     data4: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct Converter {
     m1: f64,
     m2: f64,
@@ -53,6 +55,7 @@ fn main() {
     let arg = args.get(1).unwrap_or(&default_tty);
     let mut sensor_datas = Vec::new();
     let mut distance_datas = Vec::new();
+    let mut converted_data = Converter::new();
 
     println!("Enter number of data points: ");
     let num_points = get_input_from_user::<usize>();
@@ -95,7 +98,7 @@ fn main() {
             }
         }
 
-        let mut converted_data =
+        converted_data =
             Converter::from_raw_data_and_distance_data(&sensor_datas, &distance_datas).unwrap();
 
         dbg!(&converted_data);
@@ -146,6 +149,8 @@ fn main() {
             }
         }
     }
+    let file = File::create("sick_parameters.yaml").unwrap();
+    serde_yaml::to_writer(file, &converted_data).unwrap();
 }
 
 impl DistanceData {
@@ -283,6 +288,19 @@ impl Converter {
             distance4: self.m4 * raw.data4 + self.c4,
         }
     }
+
+    fn new() -> Self {
+        Self {
+            m1: 0.0,
+            m2: 0.0,
+            m3: 0.0,
+            m4: 0.0,
+            c1: 0.0,
+            c2: 0.0,
+            c3: 0.0,
+            c4: 0.0,
+        }
+    }
 }
 
 fn fit_linear_model(xs: &[f64], ys: &[f64]) -> (f64, f64) {
@@ -300,7 +318,7 @@ fn fit_linear_model(xs: &[f64], ys: &[f64]) -> (f64, f64) {
 
     let slope = cov_xy / var_x;
     let intercept = mean_y - slope * mean_x;
-    (slope, intercept)
+    return (slope, intercept);
 }
 
 fn get_input_from_user<T>() -> T
