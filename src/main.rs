@@ -12,10 +12,10 @@ struct StmRxMsg {
     omega1: f32,
     omega2: f32,
     omega3: f32,
-    dis1: f32,
-    dis2: f32,
-    dis3: f32,
-    dis4: f32,
+    dis1: u32,
+    dis2: u32,
+    dis3: u32,
+    dis4: u32,
     crc: u8,
 }
 
@@ -29,10 +29,10 @@ struct DistanceData {
 
 #[derive(Debug)]
 struct RawData {
-    data1: f64,
-    data2: f64,
-    data3: f64,
-    data4: f64,
+    data1: u64,
+    data2: u64,
+    data3: u64,
+    data4: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -76,6 +76,7 @@ fn main() {
                 let distance = get_input_from_user::<f64>();
 
                 let sensor_data = RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), 100);
+                println!("Enter next data");
                 match i {
                     0 => {
                         distance_datas[index].distance1 = distance;
@@ -108,6 +109,7 @@ fn main() {
             let reply = get_input_from_user::<String>().to_lowercase();
             if reply == "y" || reply == "yes" {
                 let sensor_data = RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), 100);
+                dbg!(&sensor_data);
                 let distance = converted_data.convert(sensor_data);
                 dbg!(distance);
             } else {
@@ -122,7 +124,8 @@ fn main() {
                     let distance = get_input_from_user::<f64>();
 
                     let sensor_data =
-                        RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), 100);
+                        &RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), 100);
+                    println!("Enter next data");
                     match sensor_num {
                         0 => {
                             distance_datas[index].distance1 = distance;
@@ -167,13 +170,13 @@ impl DistanceData {
 impl RawData {
     fn new() -> Self {
         RawData {
-            data1: 0.0,
-            data2: 0.0,
-            data3: 0.0,
-            data4: 0.0,
+            data1: 0,
+            data2: 0,
+            data3: 0,
+            data4: 0,
         }
     }
-    fn from(data1: f64, data2: f64, data3: f64, data4: f64) -> Self {
+    fn from(data1: u64, data2: u64, data3: u64, data4: u64) -> Self {
         RawData {
             data1,
             data2,
@@ -182,7 +185,7 @@ impl RawData {
         }
     }
     fn from_raw_vec(raws: Vec<RawData>) -> Self {
-        let len = raws.len() as f64;
+        let len = raws.len() as u64;
 
         let sum = raws.iter().fold(RawData::new(), |acc, raw| RawData {
             data1: acc.data1 + raw.data1,
@@ -208,10 +211,10 @@ impl RawData {
                     if let Some(()) = start_in {
                         let msg = StmRxMsg::read_from_bytes(&buf).unwrap();
                         raw_vec.push(RawData::from(
-                            msg.dis1 as f64,
-                            msg.dis2 as f64,
-                            msg.dis3 as f64,
-                            msg.dis4 as f64,
+                            msg.dis1 as u64,
+                            msg.dis2 as u64,
+                            msg.dis3 as u64,
+                            msg.dis4 as u64,
                         ));
                         serial_state = receive_data(&mut port, &mut buf, serial_state);
                     } else {
@@ -282,10 +285,10 @@ impl Converter {
 
     fn convert(&self, raw: RawData) -> DistanceData {
         DistanceData {
-            distance1: self.m1 * raw.data1 + self.c1,
-            distance2: self.m2 * raw.data2 + self.c2,
-            distance3: self.m3 * raw.data3 + self.c3,
-            distance4: self.m4 * raw.data4 + self.c4,
+            distance1: self.m1 * raw.data1 as f64 + self.c1,
+            distance2: self.m2 * raw.data2 as f64 + self.c2,
+            distance3: self.m3 * raw.data3 as f64 + self.c3,
+            distance4: self.m4 * raw.data4 as f64 + self.c4,
         }
     }
 
@@ -303,21 +306,23 @@ impl Converter {
     }
 }
 
-fn fit_linear_model(xs: &[f64], ys: &[f64]) -> (f64, f64) {
+fn fit_linear_model(xs: &[u64], ys: &[f64]) -> (f64, f64) {
+    dbg!(xs);
+    dbg!(ys);
     let n = xs.len() as f64;
-    let mean_x = xs.iter().sum::<f64>() / n;
+    let mean_x = xs.iter().sum::<u64>() as f64 / n;
     let mean_y = ys.iter().sum::<f64>() / n;
 
     let (mut cov_xy, mut var_x) = (0.0f64, 0.0f64);
     for (&x, &y) in xs.iter().zip(ys.iter()) {
-        let dx = x - mean_x;
-        let dy = y - mean_y;
+        let dx = x as f64 - mean_x;
+        let dy = y as f64 - mean_y;
         cov_xy += dx * dy;
         var_x += dx * dx;
     }
 
     let slope = cov_xy / var_x;
-    let intercept = mean_y - slope * mean_x;
+    let intercept = mean_y - slope * mean_x as f64;
     return (slope, intercept);
 }
 

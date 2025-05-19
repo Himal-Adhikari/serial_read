@@ -1,5 +1,6 @@
 use serialport::SerialPort;
 
+#[derive(Debug)]
 pub enum SerialState {
     StartByte(Option<()>),
     Working,
@@ -48,7 +49,7 @@ pub fn receive_data(
                 if *temp_buf.first().unwrap() == START_BYTE {
                     return SerialState::Working;
                 } else {
-                    return SerialState::StartByte(Some(()));
+                    return SerialState::StartByte(None);
                 }
             }
         }
