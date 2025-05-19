@@ -48,6 +48,7 @@ struct Converter {
 }
 
 const BYTE_SIZE: usize = std::mem::size_of::<StmRxMsg>();
+const SAMPLE_SIZE: usize = 100;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -65,18 +66,18 @@ fn main() {
         sensor_datas.push(RawData::new());
     }
 
-    println!("Trying to Open Port {}", arg);
     if let Ok(port) = serialport::new(arg, 115200)
         .timeout(Duration::from_millis(100))
         .open()
     {
         for i in 0..4 {
-            println!("Provide data for {0}th sensor", i + 1);
+            println!("Provide data for sensor number {0}: ", i + 1);
             for index in 0..num_points {
+                println!("Enter data: ");
                 let distance = get_input_from_user::<f64>();
 
-                let sensor_data = RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), 100);
-                println!("Enter next data");
+                let sensor_data =
+                    RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
                 match i {
                     0 => {
                         distance_datas[index].distance1 = distance;
@@ -108,7 +109,8 @@ fn main() {
             println!("Do you want to test your model: (Y/N)");
             let reply = get_input_from_user::<String>().to_lowercase();
             if reply == "y" || reply == "yes" {
-                let sensor_data = RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), 100);
+                let sensor_data =
+                    RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
                 dbg!(&sensor_data);
                 let distance = converted_data.convert(sensor_data);
                 dbg!(distance);
@@ -119,13 +121,13 @@ fn main() {
                     break;
                 }
                 println!("Which sensor do you want to redo: ");
-                let sensor_num = get_input_from_user::<usize>();
+                let sensor_num = get_input_from_user::<usize>() - 1;
                 for index in 0..num_points {
+                    println!("Enter data: ");
                     let distance = get_input_from_user::<f64>();
 
                     let sensor_data =
-                        &RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), 100);
-                    println!("Enter next data");
+                        RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
                     match sensor_num {
                         0 => {
                             distance_datas[index].distance1 = distance;
@@ -149,6 +151,7 @@ fn main() {
                 converted_data =
                     Converter::from_raw_data_and_distance_data(&sensor_datas, &distance_datas)
                         .unwrap();
+                dbg!(&converted_data);
             }
         }
     }
@@ -205,6 +208,8 @@ impl RawData {
         let mut raw_vec: Vec<RawData> = Vec::new();
         let mut serial_state = SerialState::StartByte(None);
         let mut buf: [u8; BYTE_SIZE] = [0; BYTE_SIZE];
+        port.clear(serialport::ClearBuffer::Input).unwrap();
+        println!("Cleared input buffer");
         while raw_vec.len() < num {
             match serial_state {
                 SerialState::StartByte(start_in) => {
@@ -307,8 +312,6 @@ impl Converter {
 }
 
 fn fit_linear_model(xs: &[u64], ys: &[f64]) -> (f64, f64) {
-    dbg!(xs);
-    dbg!(ys);
     let n = xs.len() as f64;
     let mean_x = xs.iter().sum::<u64>() as f64 / n;
     let mean_y = ys.iter().sum::<f64>() / n;
