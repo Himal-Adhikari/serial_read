@@ -1,6 +1,7 @@
 use serde::Serialize;
 use serial_read::lib::crc::*;
 use serialport::SerialPort;
+use std::collections::HashMap;
 use std::fs::File;
 use std::{fmt::Debug, str::FromStr, time::Duration};
 use zerocopy::FromBytes;
@@ -27,7 +28,7 @@ struct DistanceData {
     distance4: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct RawData {
     data1: u64,
     data2: u64,
@@ -77,7 +78,7 @@ fn main() {
                 let distance = get_input_from_user::<f64>();
 
                 let sensor_data =
-                    RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
+                    RawData::get_mode_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
                 match i {
                     0 => {
                         distance_datas[index].distance1 = distance;
@@ -110,7 +111,7 @@ fn main() {
             let reply = get_input_from_user::<String>().to_lowercase();
             if reply == "y" || reply == "yes" {
                 let sensor_data =
-                    RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
+                    RawData::get_mode_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
                 dbg!(&sensor_data);
                 let distance = converted_data.convert(sensor_data);
                 dbg!(distance);
@@ -127,7 +128,7 @@ fn main() {
                     let distance = get_input_from_user::<f64>();
 
                     let sensor_data =
-                        RawData::get_mean_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
+                        RawData::get_mode_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
                     match sensor_num {
                         0 => {
                             distance_datas[index].distance1 = distance;
@@ -197,19 +198,60 @@ impl RawData {
             data4: acc.data4 + raw.data4,
         });
 
-        RawData {
+        let mean_data = RawData {
             data1: sum.data1 / len,
             data2: sum.data2 / len,
             data3: sum.data3 / len,
             data4: sum.data4 / len,
+        };
+
+        let variance_data = raws
+            .iter()
+            .map(|input| RawData {
+                data1: ((input.data1 as i64 - mean_data.data1 as i64).abs() as u64).pow(2),
+                data2: ((input.data2 as i64 - mean_data.data2 as i64).abs() as u64).pow(2),
+                data3: ((input.data3 as i64 - mean_data.data3 as i64).abs() as u64).pow(2),
+                data4: ((input.data4 as i64 - mean_data.data4 as i64).abs() as u64).pow(2),
+            })
+            .fold(RawData::new(), |acc, raw| RawData {
+                data1: acc.data1 + raw.data1,
+                data2: acc.data2 + raw.data2,
+                data3: acc.data3 + raw.data3,
+                data4: acc.data4 + raw.data4,
+            });
+        let variance = RawData {
+            data1: variance_data.data1 / len,
+            data2: variance_data.data2 / len,
+            data3: variance_data.data3 / len,
+            data4: variance_data.data4 / len,
+        };
+        println!(
+            "Standard Deviation: {0}, {1}, {2}, {3}",
+            (variance.data1 as f64).sqrt(),
+            (variance.data2 as f64).sqrt(),
+            (variance.data3 as f64).sqrt(),
+            (variance.data4 as f64).sqrt()
+        );
+        let mut counts = HashMap::new();
+        for value in raws.iter() {
+            *counts.entry(value).or_insert(0) += 1;
         }
+
+        let max_count = counts.values().copied().max().unwrap_or(0);
+        let to_return = counts
+            .into_iter()
+            .filter(|&(_, count)| count == max_count)
+            .map(|(val, _)| val.clone())
+            .collect::<Vec<RawData>>();
+
+        to_return.first().unwrap().clone()
     }
-    fn get_mean_raw_from_serial(mut port: Box<dyn SerialPort>, num: usize) -> Self {
+    fn get_mode_raw_from_serial(mut port: Box<dyn SerialPort>, num: usize) -> Self {
         let mut raw_vec: Vec<RawData> = Vec::new();
         let mut serial_state = SerialState::StartByte(None);
         let mut buf: [u8; BYTE_SIZE] = [0; BYTE_SIZE];
         port.clear(serialport::ClearBuffer::Input).unwrap();
-        println!("Cleared input buffer");
+        println!("Cleared buffer");
         while raw_vec.len() < num {
             match serial_state {
                 SerialState::StartByte(start_in) => {
@@ -231,7 +273,8 @@ impl RawData {
                 }
             }
         }
-        RawData::from_raw_vec(raw_vec)
+        let new_vec = raw_vec.split_off(20);
+        RawData::from_raw_vec(new_vec)
     }
 }
 
