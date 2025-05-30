@@ -17,6 +17,7 @@ struct StmRxMsg {
     dis2: u32,
     dis3: u32,
     dis4: u32,
+    is_true: u8,
     crc: u8,
 }
 
@@ -49,7 +50,7 @@ struct Converter {
 }
 
 const BYTE_SIZE: usize = std::mem::size_of::<StmRxMsg>();
-const SAMPLE_SIZE: usize = 100;
+const SAMPLE_SIZE: usize = 200;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -189,7 +190,7 @@ impl RawData {
         }
     }
     fn from_raw_vec(raws: Vec<RawData>) -> Self {
-        let len = raws.len() as u64;
+        let len = raws.len() as f64;
 
         let sum = raws.iter().fold(RawData::new(), |acc, raw| RawData {
             data1: acc.data1 + raw.data1,
@@ -198,39 +199,33 @@ impl RawData {
             data4: acc.data4 + raw.data4,
         });
 
-        let mean_data = RawData {
-            data1: sum.data1 / len,
-            data2: sum.data2 / len,
-            data3: sum.data3 / len,
-            data4: sum.data4 / len,
-        };
+        let (mean_1, mean_2, mean_3, mean_4) = (
+            sum.data1 as f64 / len,
+            sum.data2 as f64 / len,
+            sum.data3 as f64 / len,
+            sum.data4 as f64 / len,
+        );
 
-        let variance_data = raws
-            .iter()
-            .map(|input| RawData {
-                data1: ((input.data1 as i64 - mean_data.data1 as i64).abs() as u64).pow(2),
-                data2: ((input.data2 as i64 - mean_data.data2 as i64).abs() as u64).pow(2),
-                data3: ((input.data3 as i64 - mean_data.data3 as i64).abs() as u64).pow(2),
-                data4: ((input.data4 as i64 - mean_data.data4 as i64).abs() as u64).pow(2),
-            })
-            .fold(RawData::new(), |acc, raw| RawData {
-                data1: acc.data1 + raw.data1,
-                data2: acc.data2 + raw.data2,
-                data3: acc.data3 + raw.data3,
-                data4: acc.data4 + raw.data4,
-            });
-        let variance = RawData {
-            data1: variance_data.data1 / len,
-            data2: variance_data.data2 / len,
-            data3: variance_data.data3 / len,
-            data4: variance_data.data4 / len,
-        };
+        let variance_data = raws.iter().fold((0.0, 0.0, 0.0, 0.0), |acc, input| {
+            (
+                acc.0 + (input.data1 as f64 - mean_1).powi(2),
+                acc.1 + (input.data2 as f64 - mean_2).powi(2),
+                acc.2 + (input.data3 as f64 - mean_3).powi(2),
+                acc.3 + (input.data4 as f64 - mean_4).powi(2),
+            )
+        });
+        let (variance_1, variance_2, variance_3, variance_4) = (
+            variance_data.0 / len,
+            variance_data.1 / len,
+            variance_data.2 / len,
+            variance_data.3 / len,
+        );
         println!(
             "Standard Deviation: {0}, {1}, {2}, {3}",
-            (variance.data1 as f64).sqrt(),
-            (variance.data2 as f64).sqrt(),
-            (variance.data3 as f64).sqrt(),
-            (variance.data4 as f64).sqrt()
+            variance_1.sqrt(),
+            variance_2.sqrt(),
+            variance_3.sqrt(),
+            variance_4.sqrt()
         );
         let mut counts = HashMap::new();
         for value in raws.iter() {
@@ -257,6 +252,8 @@ impl RawData {
                 SerialState::StartByte(start_in) => {
                     if let Some(()) = start_in {
                         let msg = StmRxMsg::read_from_bytes(&buf).unwrap();
+                        let tmp = msg.dis1;
+                        println!("{tmp}");
                         raw_vec.push(RawData::from(
                             msg.dis1 as u64,
                             msg.dis2 as u64,
