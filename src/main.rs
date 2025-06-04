@@ -1,8 +1,9 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_yaml::from_reader;
 use serial_read::lib::crc::*;
 use serialport::SerialPort;
-use std::collections::HashMap;
 use std::fs::File;
+use std::io::Read;
 use std::{fmt::Debug, str::FromStr, time::Duration};
 use zerocopy::FromBytes;
 use zerocopy_derive::FromBytes;
@@ -37,7 +38,7 @@ struct RawData {
     data4: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Converter {
     m1: f64,
     m2: f64,
@@ -56,6 +57,12 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let default_tty = String::from("/dev/ttyUSB0");
     let arg = args.get(1).unwrap_or(&default_tty);
+    if arg == "test" {
+        let arg = args.get(2).unwrap_or(&default_tty);
+        test_sensors(arg);
+        println!("Exiting");
+        return;
+    }
     let mut sensor_datas = Vec::new();
     let mut distance_datas = Vec::new();
     let mut converted_data = Converter::new();
@@ -113,7 +120,6 @@ fn main() {
             if reply == "y" || reply == "yes" {
                 let sensor_data =
                     RawData::get_mode_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
-                dbg!(&sensor_data);
                 let distance = converted_data.convert(sensor_data);
                 dbg!(distance);
             } else {
@@ -159,6 +165,31 @@ fn main() {
     }
     let file = File::create("sick_parameters.yaml").unwrap();
     serde_yaml::to_writer(file, &converted_data).unwrap();
+}
+
+fn test_sensors(arg: &str) -> () {
+    let mut file =
+        File::open("sick_parameters.yaml").expect("No file named sick_parameters.yaml found");
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).unwrap();
+
+    let converted_data: Converter = from_reader(contents.as_bytes()).unwrap();
+    if let Ok(port) = serialport::new(arg, 115200)
+        .timeout(Duration::from_millis(100))
+        .open()
+    {
+        loop {
+            println!("Do you want to test your model: (Y/N)");
+            let reply = get_input_from_user::<String>().to_lowercase();
+            if reply == "n" || reply == "no" {
+                return;
+            }
+            let sensor_data =
+                RawData::get_mode_raw_from_serial(port.try_clone().unwrap(), SAMPLE_SIZE);
+            let distance = converted_data.convert(sensor_data);
+            dbg!(distance);
+        }
+    }
 }
 
 impl DistanceData {
@@ -214,46 +245,64 @@ impl RawData {
                 acc.3 + (input.data4 as f64 - mean_4).powi(2),
             )
         });
-        let (variance_1, variance_2, variance_3, variance_4) = (
-            variance_data.0 / len,
-            variance_data.1 / len,
-            variance_data.2 / len,
-            variance_data.3 / len,
+
+        let (min, max) = raws.iter().fold(
+            (
+                (u64::MAX, u64::MAX, u64::MAX, u64::MAX),
+                (u64::MIN, u64::MIN, u64::MIN, u64::MIN),
+            ),
+            |(min, max), raw| {
+                (
+                    (
+                        min.0.min(raw.data1),
+                        min.1.min(raw.data2),
+                        min.2.min(raw.data3),
+                        min.3.min(raw.data4),
+                    ),
+                    (
+                        max.0.max(raw.data1),
+                        max.1.max(raw.data2),
+                        max.2.max(raw.data3),
+                        max.3.max(raw.data4),
+                    ),
+                )
+            },
         );
         println!(
-            "Standard Deviation: {0}, {1}, {2}, {3}",
-            variance_1.sqrt(),
-            variance_2.sqrt(),
-            variance_3.sqrt(),
-            variance_4.sqrt()
+            "Mean ± σ: ({0} ± {1}), ({2} ± {3}), ({4} ± {5}), ({6} ± {7})",
+            mean_1,
+            (variance_data.0 / len).sqrt(),
+            mean_2,
+            (variance_data.1 / len).sqrt(),
+            mean_3,
+            (variance_data.2 / len).sqrt(),
+            mean_4,
+            (variance_data.3 / len).sqrt()
         );
-        let mut counts = HashMap::new();
-        for value in raws.iter() {
-            *counts.entry(value).or_insert(0) += 1;
+
+        println!(
+            "Min...Max: ({0}...{1}), ({2}...{3}), ({4}...{5}), ({6}...{7})",
+            min.0, max.0, min.1, max.1, min.2, max.2, min.3, max.3
+        );
+
+        // Return Mean
+        RawData {
+            data1: mean_1 as u64,
+            data2: mean_2 as u64,
+            data3: mean_3 as u64,
+            data4: mean_4 as u64,
         }
-
-        let max_count = counts.values().copied().max().unwrap_or(0);
-        let to_return = counts
-            .into_iter()
-            .filter(|&(_, count)| count == max_count)
-            .map(|(val, _)| val.clone())
-            .collect::<Vec<RawData>>();
-
-        to_return.first().unwrap().clone()
     }
     fn get_mode_raw_from_serial(mut port: Box<dyn SerialPort>, num: usize) -> Self {
         let mut raw_vec: Vec<RawData> = Vec::new();
         let mut serial_state = SerialState::StartByte(None);
         let mut buf: [u8; BYTE_SIZE] = [0; BYTE_SIZE];
         port.clear(serialport::ClearBuffer::Input).unwrap();
-        println!("Cleared buffer");
         while raw_vec.len() < num {
             match serial_state {
                 SerialState::StartByte(start_in) => {
                     if let Some(()) = start_in {
                         let msg = StmRxMsg::read_from_bytes(&buf).unwrap();
-                        let tmp = msg.dis1;
-                        println!("{tmp}");
                         raw_vec.push(RawData::from(
                             msg.dis1 as u64,
                             msg.dis2 as u64,
